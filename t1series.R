@@ -3,6 +3,7 @@
 library(dplyr)
 library(forecast)
 library(xts)
+library(imputeTS)
 
 # Lendo os Dados ###############################################################
 
@@ -76,8 +77,22 @@ save.image("~/Series Temporais -2020/Trabalhos/T1Series/checkpoint1.RData")
 
 load("~/Series Temporais -2020/Trabalhos/T1Series/checkpoint1.RData")
 
+# Antes de transformar a série diária em semanal, precisamos tratar os valores
+# faltantes. De acordo com o enunciado, "consideramos a média das observações 
+# vizinhas (observações anterior e posterior ao NA)".
+# Fiz isso imputação via médias móveis:
+df2$V2 <- na_ma(df2$V2, k = 1, weighting = "simple", maxgap = Inf)
 
+# Agrupando os dados em semanas
+df2$Week <- cut.Date(df2$V1, breaks = "weeks")
+df_ts <- df2 %>% group_by(Week) %>% summarise(Mortes=sum(V2))
+df_ts$Week <- as.Date(df_ts$Week, format = "%Y-%m-%d")
 
-
+plot(x = df_ts$Week,
+     y = df_ts$Mortes,
+     type = "l", 
+     main = "Mortes Semanais - Chicago", 
+     xlab = "Data",
+     ylab = "Mortes")
 
 
