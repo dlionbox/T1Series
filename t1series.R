@@ -5,6 +5,8 @@ library(forecast)
 library(xts)
 library(imputeTS)
 library(anomalize)
+library(tseries)
+library(TSA)
 
 # Lendo os Dados ###############################################################
 
@@ -89,7 +91,7 @@ df2$Week <- cut.Date(df2$V1, breaks = "weeks")
 df_ts <- df2 %>% group_by(Week) %>% summarise(Mortes=sum(V2))
 df_ts$Week <- as.Date(df_ts$Week, format = "%Y-%m-%d")
 
-# Questão 1 ####################################################################
+# Questão 1a ###################################################################
 
 # Transformando o dataframe em série xts
 serie <- xts(df_ts$Mortes, order.by = df_ts$Week, frequency = 52)
@@ -152,4 +154,80 @@ df_ts %>%
 # Para entender o motivo da anomalia do dia 06/Mar/89, precisamos entender
 # melhor de onde vieram nossos dados (coisa que não tenho).
 
-# Questão 2 ####################################################################
+# Questão 1b ###################################################################
+
+# Como vimos na questão 1a, nossa série possui tendência e sazonalidade. Dado
+# isso, a série não é estacionária.
+# Teste Dick Fuller para raiz unitária:
+adf.test(serie, k = 200)
+
+# Pela fac, percebemos um decaimento lento do valor das autocorrelações ao longo
+# das defasagens, o que indica presença de tendência. Além disso, a sazonalidade
+# é evidenciada pelos picos na fac de 52 em 52 defasagens, aproximadamente.
+acf(serie, lag.max = 200)
+
+# Nosso modelo terá que levar em consideração isso.
+# Separamos os últimos 3 meses dos dados para verificar as previsões.
+# Vou retirar a primeira observação do treino... sabemos que é outlier.
+
+# Transformando a série para ficar mais homogênea:
+serie<- 10/serie
+
+treino <- serie[2:(length(serie)-13)]
+teste <- serie[(length(serie)-12):length(serie)]
+
+# Agora com os dados prontos, vamos começar modelando a tendência.
+# Pela decomposição feita anteriormente, uma tendência linear já deve resolver.
+detrend_fit <- lm(treino ~ seq(1:length(treino)))
+summary(detrend_fit)
+
+plot(treino, type = "l")
+lines(detrend_fit$fitted.values, col='red')
+
+# Acho que pode melhorar... queremos um comportamento ondulado leve
+detrend_fit2 <- lm(treino ~  cos(2/(365*3)*3.14*seq(1:length(treino))) +
+                     sin(2/(365*0.8)*3.14*seq(1:length(treino)))+
+                                    sqrt(seq(1:length(treino))^3))
+summary(detrend_fit2)
+
+plot(treino, type = "l")
+lines(detrend_fit2$fitted.values, col='red')
+
+# Precisamos verificar a sazonalidade agora.
+# Tentando por um modelo de dummys:
+deseas_fit <- lm(treino ~ cos(2/(365*3)*3.14*seq(1:length(treino))) +
+                   sin(2/(365*0.8)*3.14*seq(1:length(treino)))+
+                   sqrt(seq(1:length(treino))^3)+
+                   seasonaldummy(ts(treino, frequency = 52)))
+summary(deseas_fit)
+
+plot(treino, type = "l")
+lines(deseas_fit$fitted.values, col='red')
+
+# Regressão harmônica:
+deseas_fit2 <- lm(treino ~ cos(2/(365*3)*3.14*seq(1:length(treino))) +
+                    sin(2/(365*0.8)*3.14*seq(1:length(treino)))+
+                    sqrt(seq(1:length(treino))^3)+
+                    harmonic(ts(treino, frequency = 52), 1))
+summary(deseas_fit2)
+
+plot(treino, type = "l")
+lines(deseas_fit2$fitted.values, col='red')
+
+# Checando a estrutura de dependência:
+# modelo deseas_fit:
+acf(deseas_fit$residuals, lag.max = 200)
+pacf(deseas_fit$residuals, lag.max = 200)
+
+# modelo deseas_fit2:
+acf(deseas_fit2$residuals, lag.max = 200)
+pacf(deseas_fit2$residuals, lag.max = 200)
+
+# Vemos pela FAC e FACP que os dois modelos ainda não conseguiram captar toda 
+# a dependência dos dados...
+# Pelo summary do modelo 'deseas_fit2', as componentes de tendência e 
+# sazonalidade são significativas, 
+
+residuo <- ts(deseas_fit2$residuals, frequency = 52)
+plot(residuo)
+
