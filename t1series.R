@@ -1,12 +1,25 @@
 # Importando Pacotes ###########################################################
 
+# install.packages('tibbletime',
+#                  dependencies=TRUE,
+#                  INSTALL_opts = c('--no-lock'))
+
+# Para instalar o pacote TSA (caso dê problema):
+# no site https://cran.r-project.org/src/contrib/Archive/TSA/,
+# baixe o arquivo 'TSA_1.2.1.tar.gz' (o mais recente).
+# instale as dependências ('leaps', 'locfit').
+# instale o TSA do arquivo que você baixou:
+# install.packages('~/Downloads/TSA_1.2.1.tar.gz')
+
 library(dplyr)
 library(forecast)
 library(xts)
 library(imputeTS)
 library(anomalize)
 library(tseries)
+library(aTSA)
 library(TSA)
+library(tibbletime)
 
 # Lendo os Dados ###############################################################
 
@@ -135,6 +148,7 @@ FT
 # Pelo pacote anomalize, conseguimos detectar anomalias na nossa série,
 # baseados no resíduo de uma decomposição.
 df_ts %>% 
+  as_tbl_time(index = Week) %>% 
   time_decompose(Mortes) %>%
   anomalize(remainder) %>%
   time_recompose() %>%
@@ -159,39 +173,66 @@ df_ts %>%
 # Como vimos na questão 1a, nossa série possui tendência e sazonalidade. Dado
 # isso, a série não é estacionária.
 # Teste Dick Fuller para raiz unitária:
-adf.test(serie, k = 200)
+adf.test(serie,nlag = 20)
 
 # Pela fac, percebemos um decaimento lento do valor das autocorrelações ao longo
 # das defasagens, o que indica presença de tendência. Além disso, a sazonalidade
 # é evidenciada pelos picos na fac de 52 em 52 defasagens, aproximadamente.
-acf(serie, lag.max = 200)
+acf(serie, lag.max = 500)
+pacf(serie, lag.max = 200)
 
 # Nosso modelo terá que levar em consideração isso.
 # Separamos os últimos 3 meses dos dados para verificar as previsões.
 # Vou retirar a primeira observação do treino... sabemos que é outlier.
-
-# Transformando a série para ficar mais homogênea:
-serie<- 10/serie
-
 treino <- serie[2:(length(serie)-13)]
 teste <- serie[(length(serie)-12):length(serie)]
 
 # Agora com os dados prontos, vamos começar modelando a tendência.
 # Pela decomposição feita anteriormente, uma tendência linear já deve resolver.
-detrend_fit <- lm(treino ~ seq(1:length(treino)))
+detrend_fit <- lm(treino ~ seq(1,length(treino), by = 1))
 summary(detrend_fit)
 
 plot(treino, type = "l")
 lines(detrend_fit$fitted.values, col='red')
 
+# É estacionário agora?
+adf.test(detrend_fit$residuals)
+
+# Estrutura de dependência:
+acf(detrend_fit$residuals, lag.max = 500)
+pacf(detrend_fit$residuals)
+
+# AR(3)
+ar3<- Arima(detrend_fit$residuals, order = c(3, 0, 0), include.mean = T)
+summary(ar3)
+
+acf(ar3$residuals)
+pacf(ar3$residuals)
+
+plot(detrend_fit$residuals, type = 'l')
+lines(ar3$fitted, col='red')
+
 # Acho que pode melhorar... queremos um comportamento ondulado leve
-detrend_fit2 <- lm(treino ~  cos(2/(365*3)*3.14*seq(1:length(treino))) +
-                     sin(2/(365*0.8)*3.14*seq(1:length(treino)))+
-                                    sqrt(seq(1:length(treino))^3))
+detrend_fit2 <- lm(treino ~  cos(2/(365*3)*3.14*seq(1,length(treino), by = 1)) +
+                     sin(2/(365*0.8)*3.14*seq(1,length(treino), by = 1))+
+                                    sqrt(seq(1,length(treino), by = 1)^3))
 summary(detrend_fit2)
 
 plot(treino, type = "l")
 lines(detrend_fit2$fitted.values, col='red')
+
+acf(detrend_fit2$residuals)
+pacf(detrend_fit2$residuals)
+
+# AR(3)
+ar3_2<- Arima(detrend_fit2$residuals, order = c(3, 0, 0), include.mean = T)
+summary(ar3_2)
+
+acf(ar3_2$residuals, lag.max =100)
+pacf(ar3_2$residuals, lag.max = 100)
+
+plot(detrend_fit2$residuals, type = 'l')
+lines(ar3_2$fitted, col='red')
 
 # Precisamos verificar a sazonalidade agora.
 # Tentando por um modelo de dummys:
@@ -204,6 +245,19 @@ summary(deseas_fit)
 plot(treino, type = "l")
 lines(deseas_fit$fitted.values, col='red')
 
+acf(deseas_fit$residuals, lag.max = 100)
+pacf(deseas_fit$residuals, lag.max = 100)
+
+# MA(3)
+ma3<-Arima(deseas_fit$residuals, order = c(0,0,3))
+summary(ma3)
+
+acf(ma3$residuals)
+pacf(ma3$residuals)
+
+plot(deseas_fit$residuals, type = 'l')
+lines(ma3$fitted, col='red')
+
 # Regressão harmônica:
 deseas_fit2 <- lm(treino ~ cos(2/(365*3)*3.14*seq(1:length(treino))) +
                     sin(2/(365*0.8)*3.14*seq(1:length(treino)))+
@@ -213,6 +267,19 @@ summary(deseas_fit2)
 
 plot(treino, type = "l")
 lines(deseas_fit2$fitted.values, col='red')
+
+acf(deseas_fit2$residuals)
+pacf(deseas_fit2$residuals)
+
+# MA(3)
+ma3_2<-Arima(deseas_fit2$residuals, order = c(0,0,3))
+summary(ma3_2)
+
+acf(ma3_2$residuals)
+pacf(ma3_2$residuals)
+
+plot(deseas_fit2$residuals, type = 'l')
+lines(ma3_2$fitted, col='red')
 
 # Checando a estrutura de dependência:
 # modelo deseas_fit:
@@ -224,10 +291,46 @@ acf(deseas_fit2$residuals, lag.max = 200)
 pacf(deseas_fit2$residuals, lag.max = 200)
 
 # Vemos pela FAC e FACP que os dois modelos ainda não conseguiram captar toda 
-# a dependência dos dados...
+# a dependência dos dados... será que ainda compensa colocar mais parâmetros?
 # Pelo summary do modelo 'deseas_fit2', as componentes de tendência e 
-# sazonalidade são significativas, 
+# sazonalidade são significativas e o R^2 dos modelos não difere muito...
+# Melhor pegar o com menor número de parâmetros.
+
+# Questão 1c ###################################################################
 
 residuo <- ts(deseas_fit2$residuals, frequency = 52)
 plot(residuo)
 
+acf(residuo, lag.max = 200)
+pacf(residuo, lag.max = 200)
+
+qqnorm(residuo)
+qqline(residuo)
+
+BL2 = function(y,p,dmax=20){
+  # p = ordem do AR(p)
+  v = c()
+  for (i in (p+1):dmax){v[i] = Box.test(y, lag=i-p, type="Ljung-Box")$p.value}
+  plot((p+1):dmax,v[(p+1):dmax],pch=20,ylim=c(0,1),xlab="Defasagem",ylab="Valor-p")
+  abline(h=0.05,lty=2,col="blue")
+}
+
+# Resíduos ainda são dependentes...
+# Rejeitamos a hipótese nula do teste Box-Ljung de independência dos resíduos.
+BL2(residuo, p=1, dmax = 20)
+
+plot(deseas_fit2$fitted.values, residuo)
+
+# Questão 1d ###################################################################
+
+# Como poderíamos fazer previsões?
+modelo<-Arima(treino, order = c(3,0,0), xreg = seq(1,length(treino), by = 1))
+summary(modelo)
+
+plot(treino, type = 'l')
+lines(modelo$fitted, col='red')
+
+forecast::forecast(modelo,
+                   h=13,
+                   xreg=seq(length(treino)+1,length(treino)+14, by = 1)) %>% 
+  autoplot()
