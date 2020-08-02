@@ -330,7 +330,38 @@ summary(modelo)
 plot(treino, type = 'l')
 lines(modelo$fitted, col='red')
 
+# Previsões (gráfico bonito):
 forecast::forecast(modelo,
                    h=13,
-                   xreg=seq(length(treino)+1,length(treino)+14, by = 1)) %>% 
+                   xreg=seq(length(treino)+1,length(treino)+13, by = 1)) %>% 
   autoplot()
+
+# Previsões, comparando com o teste:
+previsoes<-forecast::forecast(modelo, 
+                              h=13,
+                              xreg=seq(length(treino)+1,length(treino)+13, by = 1))
+previsoes<-as.numeric(previsoes$mean)
+
+plot(teste, type = 'l')
+lines(previsoes, col='red')
+
+# Para avaliar a qualidade das previsões, vamos calcular o MAPE
+# MAPE = (1/n) * Σ(|actual – forecast| / |actual|) * 100
+mape<-abs(mean((teste-previsoes)/teste))*100
+mape
+
+# MAPE de 4.3%!! Modelo muito bom!
+# Isso significa que estamos errando, em média, 4% em nossas previsões.
+
+# MAE = (1/n) * Σ(|actual – forecast|)
+mae<-abs(mean(teste-previsoes))
+mae
+
+# Questão 1e ###################################################################
+# Pelo gráfico da nossa série, há uma componente de tendência decrescente, o que
+# pode indicar que as mortes estão diminuindo com o tempo. Para nosso modelo,
+# a componente de tendência é significativa e possui um coeficiente angular de 
+# -0.0077, o que indica uma queda nas mortes, embora muito próximo de 0.
+
+plot(serie)
+summary(modelo)
